@@ -1,0 +1,168 @@
+name: "Integrate"
+
+on:
+  pull_request: null
+  push:
+    branches:
+      - "master"
+
+jobs:
+  quality-assurance:
+    name: "Quality Assurance"
+
+    runs-on: "${{ matrix.operating-system }}"
+
+    strategy:
+      matrix:
+        operating-system:
+          - "ubuntu-latest"
+
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v4"
+
+      - name: "Set up PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          tools: "phive"
+
+      - name: "Install dependencies with composer"
+        run: "composer install --no-interaction --optimize-autoloader --prefer-dist"
+
+      - name: "Install dependencies with phive"
+        run: "phive install --copy --trust-gpg-keys 4AA394086372C20A,2A8299CE842DD38C,CF1A108D0E7AE720,2DE50EB60C013FFFA831040D12CE0F1D262429A5,E82B2FB314E9906E,51C67305FFC2E5C0"
+
+      - name: "Run friendsofphp/php-cs-fixer"
+        run: "./tools/php-cs-fixer fix --dry-run"
+
+      - name: "Run phpstan/phpstan"
+        run: "./tools/phpstan"
+
+      - name: "Run vimeo/psalm"
+        run: "./tools/psalm"
+
+  tests:
+    name: "Tests"
+
+    runs-on: "${{ matrix.operating-system }}"
+
+    strategy:
+      matrix:
+        operating-system:
+          - "macos-latest"
+          - "ubuntu-latest"
+          - "windows-latest"
+
+        php-version:
+          - "7.3"
+          - "7.4"
+          - "8.0"
+          - "8.1"
+          - "8.2"
+          - "8.3"
+
+    env:
+      PHP_EXTENSIONS: "dom, curl, gnupg, mbstring"
+      PHP_EXTENSIONS_CACHE_KEY: "php-extensions-cache-v1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v4"
+
+      - name: "Set up extension cache"
+        id: "cache-env"
+        uses: "shivammathur/cache-extensions@v1"
+        with:
+          extensions: "${{ env.PHP_EXTENSIONS }}"
+          key: "${{ env.PHP_EXTENSIONS_CACHE_KEY }}"
+          php-version: "${{ matrix.php-version }}"
+
+      - name: "Cache extensions installed with shivammathur/setup-php"
+        uses: "actions/cache@v4"
+        with:
+          path: "${{ steps.cache-env.outputs.dir }}"
+          key: "${{ steps.cache-env.outputs.key }}"
+          restore-keys: "${{ steps.cache-env.outputs.key }}"
+
+      - name: "Set up PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          extensions: "${{ env.PHP_EXTENSIONS }}"
+          ini-values: "display_errors=On, error_reporting=-1, memory_limit=2G"
+          php-version: "${{ matrix.php-version }}"
+
+      - name: "Install dependencies with composer"
+        run: "composer install --no-interaction --prefer-source"
+
+      - name: "Install phpunit/phpunit with phive"
+        env:
+          GITHUB_AUTH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: "php ./phive --no-progress install --trust-gpg-keys D8406D0D82947747293778314AA394086372C20A phpunit@^9.5"
+
+      - name: "Run tests with phpunit/phpunit"
+        run: "./tools/phpunit"
+
+  smoke-tests:
+    name: "Smoke Tests"
+
+    runs-on: "${{ matrix.operating-system }}"
+
+    strategy:
+      matrix:
+        operating-system:
+          - "macos-latest"
+          - "ubuntu-latest"
+          - "windows-latest"
+
+        php-version:
+          - "7.3"
+          - "7.4"
+          - "8.0"
+          - "8.1"
+          - "8.2"
+          - "8.3"
+
+    env:
+      PHP_EXTENSIONS: "dom, curl, gnupg, mbstring"
+      PHP_EXTENSIONS_CACHE_KEY: "php-extensions-cache-v1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v4"
+
+      - name: "Set up extension cache"
+        id: "cache-env"
+        uses: "shivammathur/cache-extensions@v1"
+        with:
+          extensions: "${{ env.PHP_EXTENSIONS }}"
+          key: "${{ env.PHP_EXTENSIONS_CACHE_KEY }}"
+          php-version: "${{ matrix.php-version }}"
+
+      - name: "Cache extensions installed with shivammathur/setup-php"
+        uses: "actions/cache@v4"
+        with:
+          path: "${{ steps.cache-env.outputs.dir }}"
+          key: "${{ steps.cache-env.outputs.key }}"
+          restore-keys: "${{ steps.cache-env.outputs.key }}"
+
+      - name: "Set up PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          extensions: "${{ env.PHP_EXTENSIONS }}"
+          ini-values: "display_errors=On, error_reporting=-1, memory_limit=2G"
+          php-version: "${{ matrix.php-version }}"
+
+      - name: "Validate composer.json"
+        run: "composer validate --strict"
+
+      - name: "Install dependencies with composer"
+        run: "composer install --no-interaction --prefer-source"
+
+      - name: "Install theseer/autoload with phive"
+        env:
+          GITHUB_AUTH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: "php ./phive --no-progress install --trust-gpg-keys BEEB9AED51C28445FAB142228DDB46C4EA2EBCDC phpab"

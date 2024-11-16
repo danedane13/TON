@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="Phive" default="build" basedir=".">
+    <property name="phive.bin" value="phive"/>
+
+    <target name="setup" depends="clean,composer,install-tools,generate-autoloader"/>
+    <target name="build" depends="setup,php-cs-fixer,test"/>
+
+    <target name="clean" unless="clean.done" description="Clean up and create artifact directories">
+        <delete dir="${basedir}/build/docs"/>
+        <delete dir="${basedir}/build/coverage"/>
+        <delete dir="${basedir}/build/logs"/>
+        <delete dir="${basedir}/build/pdepend"/>
+        <delete dir="${basedir}/build/phpab"/>
+
+        <mkdir dir="${basedir}/build/docs"/>
+        <mkdir dir="${basedir}/build/coverage"/>
+        <mkdir dir="${basedir}/build/logs"/>
+        <mkdir dir="${basedir}/build/pdepend"/>
+        <mkdir dir="${basedir}/build/phpab"/>
+
+        <property name="clean.done" value="true"/>
+    </target>
+
+    <target name="getphive" description="Get phive">
+        <exec executable="wget" taskname="wget">
+            <arg value="https://phar.io/releases/phive.phar"/>
+        </exec>
+        <exec executable="wget" taskname="wget">
+            <arg value="https://phar.io/releases/phive.phar.asc"/>
+        </exec>
+        <exec executable="gpg" taskname="gpg-get-key">
+            <arg line="--keyserver hkps.pool.sks-keyservers.net --recv-keys 0x9D8A98B29B2D5D79" />
+        </exec>
+        <exec executable="gpg" taskname="gpg-verify">
+            <arg line="--verify phive.phar.asc phive.phar" />
+        </exec>
+        <chmod file="phive.phar" perm="+x" />
+        <delete file="phive.phar.asc" />
+    </target>
+
+    <target name="prepare" unless="prepare.done" depends="clean" description="Prepare for build">
+        <property name="prepare.done" value="true"/>
+    </target>
+
+    <target name="-tools-installed">
+        <available file="${basedir}/tools/phpunit" property="tools-installed" type="file"/>
+    </target>
+
+    <target name="install-tools" unless="tools-installed" depends="-tools-installed" description="Install tools with Phive">
+        <exec executable="${phive.bin}" taskname="phive" failonerror="true">
+            <arg value="install"/>
+            <arg value="--copy" />
+            <arg value="--trust-gpg-keys" />
+            <!--        phpab,           phpunit,         phpstan,         psalm,                                   php-cs-fixer     -->
+            <arg value="4AA394086372C20A,2A8299CE842DD38C,51C67305FFC2E5C0,2DE50EB60C013FFFA831040D12CE0F1D262429A5,E82B2FB314E9906E" />
+        </exec>
+    </target>
+
+    <target name="generate-autoloader" depends="install-tools" description="Generate autoloader using PHPAB">
+        <exec executable="${basedir}/tools/phpab" taskname="phpab">
+            <arg value="--output"/>
+            <arg path="${basedir}/src/autoload.php"/>
+            <arg path="${basedir}/src"/>
+        </exec>
+    </target>
+
+    <target name="test" depends="generate-autoloader" description="Run tests">
+        <exec executable="${basedir}/tools/phpunit" taskname="phpunit"/>
+    </target>
+
+    <target name="phar" description="Create PHAR archive of Phive and its dependencies" depends="composer-no-dev">
+
+        <delete>
+            <fileset dir="${basedir}/build/phar">
+                <include name="**/*.phar"/>
+            </fileset>
+        </delete>
+
+        <exec executable="bash" outputproperty="version">
+            <arg value="-c"/>
+            <arg value="${basedir}/phive version | awk 'BEGIN { ORS = &quot;&quot;; } {print $2}'"/>
+        </exec>
+
+        <exec executable="${basedir}/tools/phpab" failonerror="true">
+            <arg value="--var"/>
+            <arg value="VERSION=${version}"/>
+            <arg value="--all"/>
+            <arg value="--phar"/>
+            <arg value="--alias" />
+            <arg value="phive.phar" />
+            <arg value="--gzip"/>
+            <arg value="--output"/>
+            <arg path="${basedir}/build/phar/phive-${version}.phar"/>
+            <arg value="--template"/>
+            <arg path="${basedir}/build/phar/bootstrap.php.in"/>
+            <arg value="--basedir" />
+            <arg path="${basedir}" />
+            <arg path="${basedir}/composer.json" />
+            <arg path="${basedir}/conf" />
+        </exec>
+
+        <chmod file="${basedir}/build/phar/phive-${version}.phar" perm="ugo+rx"/>
+
+    </target>
+
+    <target name="release" description="Make a release based on latest tag" depends="phar">
+
+        <exec executable="gpg">
+            <arg value="--local-user" />
+            <arg value="team@phar.io" />
+            <arg value="--detach-sign" />
+            <arg value="--armor" />
+            <arg value="--output" />
+            <arg path="${basedir}/build/phar/phive-${version}.phar.asc" />
+            <arg path="${basedir}/build/phar/phive-${version}.phar" />
+        </exec>
+
+    </target>
+
+    <target name="composer" description="Install composer dependencies (including dev)">
+        <exec executable="${basedir}/tools/composer">
+            <arg value="install"/>
+        </exec>
+    </target>
+
+    <target name="composer-no-dev" description="Install composer dependencies (without dev)">
+        <exec executable="${basedir}/tools/composer">
+            <arg value="install"/>
+            <arg value="--no-dev"/>
+        </exec>
+    </target>
+
+    <target name="php-cs-fixer" depends="install-tools" description="Dry run php csfixer">
+        <exec executable="./tools/php-cs-fixer" failonerror="true">
+            <arg value="fix" />
+            <arg value="--dry-run" />
+        </exec>
+    </target>
+
+    <target name="find-dead-code" depends="install-tools" description="Find dead code">
+        <exec executable="./tools/psalm" failonerror="true">
+            <arg value="--config=psalm.deadcode.xml" />
+            <arg value="--show-info=true" />
+        </exec>
+    </target>
+
+    <target name="psalm" depends="install-tools" description="Run Psalm">
+        <exec executable="./tools/psalm" failonerror="true"/>
+    </target>
+
+    <target name="phpstan" depends="install-tools" description="Run PHPStan">
+        <exec executable="./tools/phpstan" failonerror="true"/>
+    </target>
+
+    <target name="build-container-image">
+        <exec executable="podman" failonerror="true" taskname="fedora">
+            <arg value="build" />
+            <arg line="-t phive-fedora" />
+            <arg line="-f ${basedir}/Containerfile" />
+        </exec>
+        <exec executable="${basedir}/build/container/bin/strip-docker-image" failonerror="true" taskname="stripping">
+            <arg line="-i localhost/phive-fedora" />
+            <arg line="-t phive" />
+            <arg line="-d ${basedir}/build/container/Containerfile.stripped" />
+            <arg line="-p tzdata" />
+            <arg line="-f /usr/bin/php" />
+            <arg line="-f /usr/lib64/php/modules/bz2.so" />
+            <arg line="-f /usr/lib64/php/modules/curl.so" />
+            <arg line="-f /usr/lib64/php/modules/dom.so" />
+            <arg line="-f /usr/lib64/php/modules/mbstring.so" />
+            <arg line="-f /usr/lib64/php/modules/phar.so" />
+            <arg line="-f /usr/lib64/php/modules/xml.so" />
+            <arg line="-f /etc/php.ini" />
+            <arg line="-f /etc/php.d/20-curl.ini" />
+            <arg line="-f /etc/php.d/20-dom.ini" />
+            <arg line="-f /etc/php.d/20-mbstring.ini" />
+            <arg line="-f /etc/php.d/20-phar.ini" />
+            <arg line="-f /etc/php.d/20-xml.ini" />
+            <arg line="-f /etc/php.d/20-bz2.so" />
+            <arg line="-f /usr/local/bin/phive" />
+            <arg line="-f /tmp" />
+            <arg line="-f /usr/bin/which" />
+            <arg line="-f /usr/bin/gpg" />
+            <arg line="-f /usr/bin/env" />
+            <arg line="-f /usr/sbin/busybox" />
+            <arg line="-f /bin/sh" />
+            <arg line="-f /etc/pki/tls/certs/ca-bundle.crt" />
+            <arg line="-f /repo" />
+            <arg line="-f /phive" />
+        </exec>
+        <exec executable="podman" failonerror="true" taskname="cleanup">
+            <arg value="image" />
+            <arg value="prune" />
+            <arg value="--force" />
+            <arg line="--filter label=stage=phive-fedora-build" />
+        </exec>
+    </target>
+
+</project>
